@@ -1,0 +1,8 @@
+{
+  "dependencies": {
+    "commander": "^2.12.2",
+    "gdax": "github:coinbase/gdax-node",
+    "gdax-trading-toolkit": "^0.2.1",
+    "json2csv": "^3.11.5"
+  }
+}

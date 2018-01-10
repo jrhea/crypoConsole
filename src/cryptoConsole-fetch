@@ -1,0 +1,127 @@
+#!/usr/bin/env node
+"use strict";
+
+const Gdax = require('gdax');
+const program = require('commander');
+
+function list(val) {
+  return val.split(',');
+}
+
+program
+    .option('-w, --websocketUrl [value]', 'websocket url')
+    .option('-p, --product <value>', 'product to query')
+    .option('-f, --outputFields <values>', 'comma seperated list of output fields',list)
+    .option('-s, --outputStyle <value>', 'format options for output',/^(raw|pretty|csv)$/i,'pretty')
+    .parse(process.argv);
+
+var data = '';
+var config = init();
+process.stdin.on('data', function(chunk) {
+  data += chunk;
+});
+process.stdin.on('end', function() {
+  callback(data);
+});
+if(config.ticker.selected) {
+  getTickerData();
+}
+else if (config.orderBook.selected) {
+  getOrderBookData();
+}
+
+function init(){
+  //configure stdin
+  process.stdin.resume();
+  process.stdin.setEncoding('utf8');
+
+  //return config object
+  return  {
+        wssUrl: program.websocketUrl || process.env.WEBSOCKET_URL || 'wss://ws-feed.gdax.com',
+        product: program.product,
+        outputStyle: program.outputStyle,
+        ticker: {
+          selected: ( program.args[0] === 'ticker' ),
+          channel: [
+                  "heartbeat",
+                  {
+                      "name": "ticker",
+                      "product_ids": [
+                          program.product,
+                      ]
+                  }
+          ],
+          outputFields: program.outputFields || 'price,open_24h,volume_24h,low_24h,high_24h,volume_30d,best_bid,best_ask,side,time,trade_id,last_size'.split(','),
+        },
+        orderBook: {
+          selected: ( program.args[0] === 'orderBook' ),
+          outputFields: program.outputFields || 'local_time,id,side,price,size'.split(','),
+        }
+    };
+}
+
+function getTickerData(){
+  //prints out ticker
+  var isFirstRow = true;
+
+  var websocket = new Gdax.WebsocketClient([config.product], config.wssUrl, null, {
+      "channels": config.ticker.channel
+  });
+
+  websocket.on('message', data => {
+    callback(data);
+  });
+
+  function callback(data){
+    if(data.type === "ticker") outputData(data,config.outputStyle,config.ticker.outputFields,isFirstRow);
+    isFirstRow = false;
+  }
+}
+
+function getOrderBookData(){
+  //prints out order book
+  var isFirstRow = true;
+  var orderbookSync = new Gdax.OrderbookSync([config.product]);
+
+  orderbookSync.on('message',data => {
+    callback(data);
+  });
+
+  function callback(data){
+    var now = new Date();
+    var book = orderbookSync.books[[config.product]].state();
+    if(book.bids.length > 0 || book.asks.length > 0){
+      book.asks.forEach(function(row){
+        row['local_time']=now.toJSON();
+        outputData(row,config.outputStyle,config.orderBook.outputFields,isFirstRow);
+        isFirstRow = false
+      });
+      book.bids.forEach(function(row){
+        row['local_time']=now.toJSON();
+        outputData(row,config.outputStyle,config.orderBook.outputFields,isFirstRow);
+        isFirstRow = false
+      });
+    }
+  }
+}
+
+function outputData(data,style,fields,isFirstRow){
+  if(style === 'raw'){
+    process.stdout.write(JSON.stringify(data)+"\n");
+  }
+  else if(style === 'pretty'){
+    process.stdout.write(JSON.stringify(data,null,2)+"\n");
+  }
+  else if(style === 'csv'){
+    if(isFirstRow){
+      fields.forEach(function(field){
+        process.stdout.write(field + ",")
+      });
+      process.stdout.write("\n");
+    }
+    fields.forEach(function(field){
+      process.stdout.write(data[field] + ",")
+    });
+    process.stdout.write("\n");
+  }
+}
